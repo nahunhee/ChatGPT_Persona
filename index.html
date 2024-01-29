@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenAI API Interaction</title>
+    <style>
+        .input-field {
+            width: 90%;
+            margin-bottom: 10px;
+            display: block;
+        }
+
+        #log {
+            width: 100%;
+            height: 500px;
+            margin-top: 10px;
+            background-color: #f0f0f0;
+            border: 1px solid #ddd;
+            padding: 10px;
+            overflow: scroll;
+        }
+    </style>
+</head>
+
+<body>
+    <input type="text" id="apiKeyInput" class="input-field" placeholder="OPENAI API키 입력" />
+    <input type="text" id="messageInput" class="input-field" placeholder="질문 메시지 입력" />
+    <input type="text" id="personaInput" class="input-field" placeholder="Persona 입력" />
+    <button id="startButton">지정된 Persona-ChatGPT에게 물어보기</button>
+    <textarea id="log" readonly></textarea>
+
+    <script>
+        async function openAIWorkflow() {
+            const log = document.getElementById('log');
+            const message = document.getElementById('messageInput').value;
+            const OPENAI_API_KEY = document.getElementById('apiKeyInput').value;
+            const persona = document.getElementById('personaInput').value;
+            log.value = "Starting OpenAI Workflow...\n";
+
+            if (!OPENAI_API_KEY || !message || !persona) {
+                log.value += "Error: OpenAI API Key, persona, and message are required.\n";
+                return;
+            }
+
+            try {
+                // Step 1: Create an Assistant
+                let response = await fetch("https://api.openai.com/v1/assistants", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": `Bearer ${OPENAI_API_KEY}`,
+                        "OpenAI-Beta": "assistants=v1"
+                    },
+                    body: JSON.stringify({
+                        "instructions": `${persona}`,
+                        "name": "Custom_persona_chat",
+                        "model": "gpt-3.5-turbo"
+                    })
+                });
+                const assistantData = await response.json();
+                log.value += `Assistant Created: ${JSON.stringify(assistantData)}\n`;
+                if (assistantData.error) {
+                    log.value += 'Error on Assistant Creation\n'
+                    return;
+                }
+
+                // Step 2: Create a Thread
+                response = await fetch("https://api.openai.com/v1/threads", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": `Bearer ${OPENAI_API_KEY}`,
+                        "OpenAI-Beta": "assistants=v1"
+                    }
+                });
+                const threadData = await response.json();
+                // console.log('Thread Created:', threadData);
+                log.value += `Thread Created: ${JSON.stringify(threadData)}\n`;
+                // if threadData has an 'error', log "xxx"
+                if (threadData.error) {
+                    log.value += 'Error on Thread Creation\n'
+                    return;
+                }
+
+                // Assuming thread ID is in threadData, use it for the next steps
+                const threadId = threadData.id; // Replace with actual key to get the thread ID
+
+                // Step 3: Add a Message to a Thread
+                response = await fetch(`https://api.openai.com/v1/threads/${threadId}/messages`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": `Bearer ${OPENAI_API_KEY}`,
+                        "OpenAI-Beta": "assistants=v1"
+                    },
+                    body: JSON.stringify({
+                        "role": "user",
+                        "content": `${message}`
+                    })
+                });
+                const messageData = await response.json();
+                // console.log('Message Added:', messageData);
+                log.value += `Message Added: ${JSON.stringify(messageData)}\n`;
+                if (messageData.error) {
+                    log.value += 'Error on Message Addition\n'
+                    return;
+                }
+
+                // Step 4: Run the Assistant
+                // Replace assistant_id with the actual ID you got from Step 1
+                const assistantId = assistantData.id; // Replace with actual key to get the assistant ID
+                response = await fetch(`https://api.openai.com/v1/threads/${threadId}/runs`, {
+                    method: "POST",
+                    headers: {
+                        "Authorization": `Bearer ${OPENAI_API_KEY}`,
+                        "Content-Type": "application/json",
+                        "OpenAI-Beta": "assistants=v1"
+                    },
+                    body: JSON.stringify({
+                        "assistant_id": assistantId
+                    })
+                });
+                const runData = await response.json();
+                // console.log('Assistant Run:', runData);
+                log.value += `Assistant Run: ${JSON.stringify(runData)}\n`;
+                if (runData.error) {
+                    log.value += 'Error on Assistant Run\n'
+                    return;
+                }
+
+                // Assuming run ID is in runData, use it for the next step
+                const runId = runData.id; // Replace with actual key to get the run ID
+
+                // Step 5: Check the Run status
+                let runStatus;
+                do {
+                    response = await fetch(`https://api.openai.com/v1/threads/${threadId}/runs/${runId}`, {
+                        method: "GET",
+                        headers: {
+                            "Authorization": `Bearer ${OPENAI_API_KEY}`,
+                            "OpenAI-Beta": "assistants=v1"
+                        }
+                    });
+                    const statusData = await response.json();
+                    runStatus = statusData.status;
+                    log.value += `Run Status: ${runStatus}\n`;
+
+                    if (runStatus !== 'completed') {
+                        // Wait for a short period before checking again
+                        await new Promise(resolve => setTimeout(resolve, 2000)); // 2 seconds
+                    }
+                } while (runStatus !== 'completed');
+
+                // Step 6: Display the Assistant's Response
+                response = await fetch(`https://api.openai.com/v1/threads/${threadId}/messages`, {
+                    method: "GET",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": `Bearer ${OPENAI_API_KEY}`,
+                        "OpenAI-Beta": "assistants=v1"
+                    }
+                });
+                const finalData = await response.json();
+                // console.log('Assistant Response:', finalData);
+                log.value += `Assistant Response: ${JSON.stringify(finalData)}\n`;
+                // log.value += `Assistant Response: ${finalData.data[0].text}\n`;
+
+                // Assistant Response: { "object": "list", "data": [{ "id": "msg_lXllAqiX6J9wzbBe6JDn61NK", "object": "thread.message", "created_at": 1706495226, "thread_id": "thread_cDefQxszZjhwzB983jUBe0gx", "role": "assistant", "content": [{ "type": "text", "text": { "value": "My apologies, but I'm not able to generate a response without more information or context. Can you please provide more details or ask a specific question?", "annotations": [] } }], "file_ids": [], "assistant_id": "asst_XXO4yY3oIzXNaMVHJZxR8PXy", "run_id": "run_eG4uPcB4MM169R6ieNFWBeDt", "metadata": {} }, { "id": "msg_WE0yVia76C2oiBfjDwn8yaEW", "object": "thread.message", "created_at": 1706495224, "thread_id": "thread_cDefQxszZjhwzB983jUBe0gx", "role": "user", "content": [{ "type": "text", "text": { "value": "d", "annotations": [] } }], "file_ids": [], "assistant_id": null, "run_id": null, "metadata": {} }], "first_id": "msg_lXllAqiX6J9wzbBe6JDn61NK", "last_id": "msg_WE0yVia76C2oiBfjDwn8yaEW", "has_more": false }
+                // with blue colored text:
+                log.value += `👍 Assistant Response: ${finalData.data[0].content[0].text.value}\n`;
+
+            } catch (error) {
+                // console.error('Error:', error);
+                log.value += `OMG!! Error: ${error.message}\n`;
+
+            }
+        }
+
+        document.getElementById('startButton').addEventListener('click', openAIWorkflow);
+    </script>
+</body>
+
+</html>
